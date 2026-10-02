@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless Management System
+Resources:
+  StudentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: id
+        KeyType: HASH
+  ManagementFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.lambda_handler
+      Runtime: python3.14
+      CodeUri: ManagementFunction
+      Timeout: 10
+      Role:
+        Fn::Sub: arn:aws:iam::${AWS::AccountId}:role/LabRole
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: StudentsTable
+    Metadata:
+      SamResourceId: ManagementFunction
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: serverless-management-api
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins:
+        - '*'
+        AllowMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+        AllowHeaders:
+        - Content-Type
+  ApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId:
+        Ref: HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::GetAtt:
+        - ManagementFunction
+        - Arn
+      PayloadFormatVersion: '2.0'
+  CollectionRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Ref: HttpApi
+      RouteKey: ANY /students
+      Target:
+        Fn::Sub: integrations/${ApiIntegration}
+  ItemRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Ref: HttpApi
+      RouteKey: ANY /students/{id}
+      Target:
+        Fn::Sub: integrations/${ApiIntegration}
+  ApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    DependsOn:
+    - CollectionRoute
+    - ItemRoute
+    Properties:
+      ApiId:
+        Ref: HttpApi
+      StageName: $default
+      AutoDeploy: true
+  InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: ManagementFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Sub: arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*
+Outputs:
+  ApiUrl:
+    Description: Base URL of the API
+    Value:
+      Fn::Sub: https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com

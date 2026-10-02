@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Serverless Management System
+
+Resources:
+  StudentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  ManagementFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 10
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref StudentsTable
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import uuid
+          from decimal import Decimal
+          import boto3
+
+          table = boto3.resource("dynamodb").Table(os.environ["TABLE_NAME"])
+
+          def response(status, body):
+              return {
+                  "statusCode": status,
+                  "headers": {"Content-Type": "application/json"},
+                  "body": json.dumps(body, default=str),
+              }
+
+          def lambda_handler(event, context):
+              method = event["requestContext"]["http"]["method"]
+              parts = [p for p in event.get("rawPath", "/").split("/") if p]
+              item_id = parts[1] if len(parts) > 1 else None
+              body = json.loads(event["body"], parse_float=Decimal) if event.get("body") else {}
+              try:
+                  if method == "GET" and not item_id:
+                      return response(200, table.scan().get("Items", []))
+                  if method == "GET":
+                      item = table.get_item(Key={"id": item_id}).get("Item")
+                      return response(200, item) if item else response(404, {"error": "Not found"})
+                  if method == "POST":
+                      if not body:
+                          return response(400, {"error": "Request body is empty"})
+                      item = {**body, "id": str(uuid.uuid4())}
+                      table.put_item(Item=item)
+                      return response(201, item)
+                  if method == "PUT" and item_id:
+                      item = {**body, "id": item_id}
+                      table.put_item(Item=item)
+                      return response(200, item)
+                  if method == "DELETE" and item_id:
+                      table.delete_item(Key={"id": item_id})
+                      return response(200, {"message": "Deleted"})
+                  return response(405, {"error": "Method not allowed"})
+              except Exception as e:
+                  return response(500, {"error": str(e)})
+
+  FunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ManagementFunction.Arn
+      AuthType: NONE
+      Cors:
+        AllowOrigins: ["*"]
+        AllowMethods: ["*"]
+        AllowHeaders: ["content-type"]
+
+  UrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ManagementFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  UrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ManagementFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the API
+    Value: !GetAtt FunctionUrl.FunctionUrl

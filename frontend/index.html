@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Event Management System</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 30px auto; padding: 0 15px; }
+    input { padding: 8px; margin: 4px; }
+    button { padding: 8px 12px; margin: 2px; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background: #f0f0f0; }
+  </style>
+</head>
+<body>
+  <h2>Event Management System</h2>
+  <div id="form"></div>
+  <table>
+    <thead id="head"></thead>
+    <tbody id="list"></tbody>
+  </table>
+
+  <script>
+    // 1. PASTE YOUR LINK between the quotes (it's fine if it ends with a /)
+    const API = "https://n6idbryb7jiwerujvq5h43neqm0bbsdl.lambda-url.us-east-1.on.aws/".replace(/\/+$/, "");
+
+    // 2. These are the fields. Change this list to change the whole page.
+    const FIELDS = [
+      { key: "name", label: "Event name" },
+      { key: "date", label: "Date", type: "date" },
+      { key: "venue", label: "Venue" },
+      { key: "description", label: "Description" }
+    ];
+
+    const form = document.getElementById("form");
+    FIELDS.forEach(f => {
+      const input = document.createElement("input");
+      input.id = "f_" + f.key;
+      input.placeholder = f.label;
+      input.type = f.type || "text";
+      form.appendChild(input);
+    });
+    const addBtn = document.createElement("button");
+    addBtn.textContent = "Add";
+    addBtn.onclick = addItem;
+    form.appendChild(addBtn);
+
+    document.getElementById("head").innerHTML =
+      "<tr>" + FIELDS.map(f => "<th>" + f.label + "</th>").join("") + "<th>Actions</th></tr>";
+
+    async function load() {
+      try {
+        const res = await fetch(API + "/students");
+        const items = await res.json();
+        const list = document.getElementById("list");
+        list.innerHTML = "";
+        items.forEach(item => {
+          const tr = document.createElement("tr");
+          FIELDS.forEach(f => {
+            const td = document.createElement("td");
+            td.textContent = item[f.key] || "";
+            tr.appendChild(td);
+          });
+          const actions = document.createElement("td");
+          const edit = document.createElement("button");
+          edit.textContent = "Edit";
+          edit.onclick = () => editItem(item);
+          const del = document.createElement("button");
+          del.textContent = "Delete";
+          del.onclick = () => deleteItem(item.id);
+          actions.appendChild(edit);
+          actions.appendChild(del);
+          tr.appendChild(actions);
+          list.appendChild(tr);
+        });
+      } catch (err) {
+        alert("Could not load data: " + err);
+      }
+    }
+
+    async function addItem() {
+      const body = {};
+      FIELDS.forEach(f => body[f.key] = document.getElementById("f_" + f.key).value);
+      await fetch(API + "/students", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      FIELDS.forEach(f => document.getElementById("f_" + f.key).value = "");
+      load();
+    }
+
+    async function editItem(item) {
+      const body = {};
+      for (const f of FIELDS) {
+        const v = prompt(f.label, item[f.key] || "");
+        if (v === null) return;
+        body[f.key] = v;
+      }
+      await fetch(API + "/students/" + item.id, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      load();
+    }
+
+    async function deleteItem(id) {
+      await fetch(API + "/students/" + id, { method: "DELETE" });
+      load();
+    }
+
+    load();
+  </script>
+</body>
+</html>
